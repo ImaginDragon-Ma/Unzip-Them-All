@@ -36,7 +36,6 @@ pip install PyQt5
 
 ```bash
 git clone <repository_url>
-cd Video
 ```
 
 ## 使用方法
@@ -99,11 +98,45 @@ winrar x -y -o+ -inul -p<password> <file> <output_dir>\
 
 ## 文件说明
 
-| 文件 | 说明 |
-|------|------|
-| [extractor_gui.py](extractor_gui.py) | 主程序，图形化界面 |
+| 文件/目录 | 说明 |
+|-----------|------|
+| [main.py](main.py) | 程序入口 |
+| [extractor_gui.py](extractor_gui.py) | 旧版单文件程序（已重构） |
+| [config/](config/) | 配置管理模块 |
+| [core/](core/) | 核心解压逻辑模块 |
+| [gui/](gui/) | 图形界面模块 |
+| [utils/](utils/) | 工具模块 |
 | [0move.bat](0move.bat) | 原 BAT 脚本：提取所有子目录文件 |
 | [0rename.bat](0rename.bat) | 原 BAT 脚本：批量重命名为 .zip |
+
+## 项目架构
+
+```
+video_extractor/
+├── main.py                 # 程序入口
+├── config/
+│   ├── settings.py         # 配置管理
+│   └── constants.py        # 常量定义
+├── core/
+│   ├── extractor.py        # 核心解压逻辑
+│   ├── file_analyzer.py    # 文件分析器
+│   └── winrar_helper.py    # WinRAR 封装
+├── gui/
+│   ├── main_window.py      # 主窗口
+│   └── worker_thread.py    # 工作线程
+└── utils/                  # 工具模块（预留）
+```
+
+### 模块职责
+
+| 模块 | 职责 |
+|------|------|
+| `config` | 配置加载、保存，常量定义 |
+| `core.extractor` | 解压核心逻辑，可独立测试 |
+| `core.file_analyzer` | 文件类型识别、扩展名修正 |
+| `core.winrar_helper` | WinRAR 命令行工具封装 |
+| `gui.main_window` | 主窗口 UI 组件 |
+| `gui.worker_thread` | 后台工作线程 |
 
 ## Git 提交历史
 
