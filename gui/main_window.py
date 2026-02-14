@@ -3,19 +3,130 @@
 
 import os
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
     QPushButton, QListWidget, QLabel, QLineEdit, QProgressBar,
-    QFileDialog, QMessageBox, QGroupBox, QCheckBox
+    QFileDialog, QMessageBox, QGroupBox, QCheckBox, QComboBox,
+    QDialog, QDialogButtonBox, QScrollArea
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 
 from config.settings import Config, load_config, save_config
+from config.password_manager import PasswordManager
 from core.winrar_helper import WinRARHelper
 from gui.worker_thread import ExtractWorker
+from gui.task_widget import TaskWidget
+
+
+class PasswordManagerDialog(QDialog):
+    """密码管理对话框"""
+
+    def __init__(self, password_manager: PasswordManager, parent=None):
+        super().__init__(parent)
+        self.password_manager = password_manager
+        self.passwords = password_manager.get_all()
+        self.init_ui()
+
+    def init_ui(self) -> None:
+        """初始化界面"""
+        self.setWindowTitle('管理密码')
+        self.setMinimumWidth(400)
+        self.setMinimumHeight(300)
+
+        layout = QVBoxLayout(self)
+
+        # 密码列表
+        layout.addWidget(QLabel('已保存的密码:'))
+        self.password_list = QListWidget()
+        self.password_list.setFont(QFont('Arial', 10))
+        self._update_list()
+        layout.addWidget(self.password_list)
+
+        # 输入新密码
+        input_layout = QHBoxLayout()
+        input_layout.addWidget(QLabel('新密码:'))
+        self.new_password_edit = QLineEdit()
+        self.new_password_edit.setEchoMode(QLineEdit.Password)
+        input_layout.addWidget(self.new_password_edit)
+        layout.addLayout(input_layout)
+
+        # 按钮布局
+        btn_layout = QHBoxLayout()
+
+        self.add_btn = QPushButton('添加密码')
+        self.add_btn.clicked.connect(self.add_password)
+        btn_layout.addWidget(self.add_btn)
+
+        self.delete_btn = QPushButton('删除选中')
+        self.delete_btn.clicked.connect(self.delete_password)
+        btn_layout.addWidget(self.delete_btn)
+
+        self.clear_all_btn = QPushButton('清空全部')
+        self.clear_all_btn.clicked.connect(self.clear_all)
+        btn_layout.addWidget(self.clear_all_btn)
+
+        layout.addLayout(btn_layout)
+
+        # 对话框按钮
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _update_list(self) -> None:
+        """更新密码列表"""
+        self.password_list.clear()
+        for pwd in self.passwords:
+            self.password_list.addItem('***' if pwd else '(无密码)')
+
+    def add_password(self) -> None:
+        """添加密码"""
+        password = self.new_password_edit.text().strip()
+        if not password:
+            QMessageBox.warning(self, '警告', '请输入密码！')
+            return
+
+        if password in self.passwords:
+            QMessageBox.warning(self, '警告', '密码已存在！')
+            return
+
+        self.passwords.append(password)
+        self.new_password_edit.clear()
+        self._update_list()
+
+    def delete_password(self) -> None:
+        """删除密码"""
+        current_row = self.password_list.currentRow()
+        if current_row >= 0:
+            del self.passwords[current_row]
+            self._update_list()
+        else:
+            QMessageBox.warning(self, '警告', '请选择要删除的密码！')
+
+    def clear_all(self) -> None:
+        """清空所有密码"""
+        reply = QMessageBox.question(
+            self,
+            '确认',
+            '确定要清空所有密码吗？',
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            self.passwords.clear()
+            self._update_list()
+
+    def get_passwords(self) -> List[str]:
+        """获取密码列表"""
+        return self.passwords.copy()
+
+    def accept(self) -> None:
+        """接受对话框"""
+        # 更新密码管理器
+        self.password_manager.passwords = self.passwords
+        super().accept()
 
 
 class ExtractorGUI(QMainWindow):
@@ -23,9 +134,11 @@ class ExtractorGUI(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.selected_files: List[Path] = []
+
         self.worker: ExtractWorker = None
         self.config: Config = load_config()
+        self.password_manager = PasswordManager(self.config.saved_passwords)
+        self.task_widgets: List[TaskWidget] = []
 
         # 查找 WinRAR 路径
         self.winrar_path = self.config.winrar_path
@@ -41,7 +154,7 @@ class ExtractorGUI(QMainWindow):
     def init_ui(self) -> None:
         """初始化界面"""
         self.setWindowTitle('压缩文件批量解压工具')
-        self.setGeometry(300, 300, 700, 500)
+        self.setGeometry(300, 300, 900, 700)
 
         # 中央窗口
         central_widget = QWidget()
@@ -70,63 +183,68 @@ class ExtractorGUI(QMainWindow):
 
         main_layout.addLayout(winrar_layout)
 
-        # 文件选择组
-        file_group = QGroupBox('文件选择')
-        file_layout = QVBoxLayout()
-
-        # 文件列表
-        self.file_list = QListWidget()
-        self.file_list.setFont(QFont('Arial', 10))
-        file_layout.addWidget(self.file_list)
-
-        # 按钮布局
-        btn_layout = QHBoxLayout()
-
-        self.select_btn = QPushButton('选择文件')
-        self.select_btn.clicked.connect(self.select_files)
-        btn_layout.addWidget(self.select_btn)
-
-        self.clear_btn = QPushButton('清空列表')
-        self.clear_btn.clicked.connect(self.clear_files)
-        btn_layout.addWidget(self.clear_btn)
-
-        file_layout.addLayout(btn_layout)
-        file_group.setLayout(file_layout)
-        main_layout.addWidget(file_group)
-
-        # 输出目录
-        output_layout = QHBoxLayout()
-        output_layout.addWidget(QLabel('输出目录:'))
-        self.output_path_edit = QLineEdit(os.getcwd())
-        self.output_path_edit.setFont(QFont('Arial', 10))
-        output_layout.addWidget(self.output_path_edit)
-
-        self.browse_btn = QPushButton('浏览...')
-        self.browse_btn.clicked.connect(self.browse_output_dir)
-        output_layout.addWidget(self.browse_btn)
-
-        main_layout.addLayout(output_layout)
-
-        # 密码输入
-        password_layout = QHBoxLayout()
-        password_layout.addWidget(QLabel('解压密码:'))
-        self.password_edit = QLineEdit()
-        self.password_edit.setEchoMode(QLineEdit.Password)
-        self.password_edit.setPlaceholderText('无密码可留空')
-        password_layout.addWidget(self.password_edit)
-        main_layout.addLayout(password_layout)
-
-        # 记住密码
-        self.remember_password_cb = QCheckBox('记住密码')
-        self.remember_password_cb.setChecked(self.config.remember_password)
-        self.remember_password_cb.stateChanged.connect(self.on_remember_password_changed)
-        main_layout.addWidget(self.remember_password_cb)
+        # 全局选项
+        global_options_group = QGroupBox('全局选项')
+        options_layout = QVBoxLayout()
 
         # 解压到原目录
-        self.extract_to_source_cb = QCheckBox('解压到原目录（忽略上面的输出目录设置）')
+        self.extract_to_source_cb = QCheckBox('解压到原目录（忽略任务中的输出目录设置）')
         self.extract_to_source_cb.setChecked(self.config.extract_to_source)
         self.extract_to_source_cb.stateChanged.connect(self.on_extract_to_source_changed)
-        main_layout.addWidget(self.extract_to_source_cb)
+        options_layout.addWidget(self.extract_to_source_cb)
+
+        # 统一密码
+        unified_password_layout = QHBoxLayout()
+        self.use_unified_password_cb = QCheckBox('使用统一密码（忽略任务中的密码设置）')
+        self.use_unified_password_cb.setChecked(self.config.use_unified_password)
+        self.use_unified_password_cb.stateChanged.connect(self.on_use_unified_password_changed)
+        unified_password_layout.addWidget(self.use_unified_password_cb)
+
+        self.unified_password_combo = QComboBox()
+        self.unified_password_combo.setEditable(True)
+        self.unified_password_combo.setPlaceholderText('选择或输入统一密码')
+        self.unified_password_combo.setEnabled(self.config.use_unified_password)
+        self._update_password_combo(self.unified_password_combo)
+        unified_password_layout.addWidget(self.unified_password_combo, 1)
+
+        options_layout.addLayout(unified_password_layout)
+
+        # 密码管理按钮
+        password_manage_layout = QHBoxLayout()
+        password_manage_layout.addWidget(QLabel('密码管理:'))
+        self.manage_passwords_btn = QPushButton('管理密码')
+        self.manage_passwords_btn.clicked.connect(self.manage_passwords)
+        password_manage_layout.addWidget(self.manage_passwords_btn)
+        password_manage_layout.addStretch()
+        options_layout.addLayout(password_manage_layout)
+
+        global_options_group.setLayout(options_layout)
+        main_layout.addWidget(global_options_group)
+
+        # 任务配置区域（滚动）
+        tasks_label = QLabel('任务配置:')
+        tasks_label.setFont(QFont('Arial', 11, QFont.Bold))
+        main_layout.addWidget(tasks_label)
+
+        # 任务按钮
+        task_btn_layout = QHBoxLayout()
+        self.add_task_btn = QPushButton('添加任务')
+        self.add_task_btn.clicked.connect(self.add_task)
+        task_btn_layout.addWidget(self.add_task_btn)
+        task_btn_layout.addStretch()
+        main_layout.addLayout(task_btn_layout)
+
+        # 任务容器（滚动区域）
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMinimumHeight(250)
+
+        self.tasks_container = QWidget()
+        self.tasks_layout = QVBoxLayout(self.tasks_container)
+        self.tasks_layout.addStretch()  # 添加伸缩项
+        scroll_area.setWidget(self.tasks_container)
+
+        main_layout.addWidget(scroll_area)
 
         # 进度条
         self.progress_bar = QProgressBar()
@@ -154,39 +272,53 @@ class ExtractorGUI(QMainWindow):
         self.extract_btn.clicked.connect(self.start_extract)
         main_layout.addWidget(self.extract_btn)
 
-    def select_files(self) -> None:
-        """选择文件"""
-        files, _ = QFileDialog.getOpenFileNames(
-            self,
-            '选择压缩文件',
-            os.getcwd(),
-            '压缩文件 (*.zip *.rar *.7z *.tar *.gz *.001 *.002 *.7z.001 *.part1.rar);;所有文件 (*.*)'
+    def _update_password_combo(self, combo: QComboBox) -> None:
+        """更新密码下拉框"""
+        current_text = combo.currentText()
+        combo.clear()
+        combo.addItem('')  # 空密码选项
+        for pwd in self.password_manager.get_all():
+            combo.addItem(pwd)
+
+        # 如果有统一密码，设置为选中
+        if self.config.unified_password:
+            index = combo.findText(self.config.unified_password)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+
+        # 恢复之前选中的密码
+        if current_text and not self.config.unified_password:
+            index = combo.findText(current_text)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+
+    def add_task(self) -> None:
+        """添加新任务"""
+        task_index = len(self.task_widgets)
+        task_widget = TaskWidget(
+            task_index,
+            self.password_manager.get_all(),
+            on_delete=self.delete_task
+        )
+        self.task_widgets.append(task_widget)
+
+        # 插入到伸缩项之前
+        self.tasks_layout.insertWidget(
+            self.tasks_layout.count() - 1,
+            task_widget
         )
 
-        if files:
-            for file_str in files:
-                file_path = Path(file_str)
-                if file_path not in self.selected_files:
-                    self.selected_files.append(file_path)
-                    self.file_list.addItem(file_path.name)
-            self.status_label.setText(f'已选择 {len(self.selected_files)} 个文件')
+    def delete_task(self, task_index: int) -> None:
+        """删除任务"""
+        if task_index < len(self.task_widgets):
+            task_widget = self.task_widgets[task_index]
+            self.tasks_layout.removeWidget(task_widget)
+            task_widget.deleteLater()
+            self.task_widgets.pop(task_index)
 
-    def clear_files(self) -> None:
-        """清空文件列表"""
-        self.selected_files.clear()
-        self.file_list.clear()
-        self.status_label.setText('准备就绪')
-
-    def browse_output_dir(self) -> None:
-        """浏览输出目录"""
-        dir_path = QFileDialog.getExistingDirectory(
-            self,
-            '选择输出目录',
-            os.getcwd()
-        )
-
-        if dir_path:
-            self.output_path_edit.setText(dir_path)
+            # 更新后续任务的索引
+            for i in range(task_index, len(self.task_widgets)):
+                self.task_widgets[i].update_task_index(i)
 
     def browse_winrar(self) -> None:
         """浏览 WinRAR 可执行文件"""
@@ -205,40 +337,64 @@ class ExtractorGUI(QMainWindow):
 
     def load_saved_settings(self) -> None:
         """加载保存的设置"""
-        # 加载保存的密码
-        if self.config.password and self.config.remember_password:
-            self.password_edit.setText(self.config.password)
+        # 更新密码下拉框
+        self._update_password_combo(self.unified_password_combo)
 
         # 更新输出目录的启用状态
-        self.output_path_edit.setEnabled(not self.config.extract_to_source)
-        self.browse_btn.setEnabled(not self.config.extract_to_source)
-
-    def on_remember_password_changed(self, state: int) -> None:
-        """记住密码复选框状态改变"""
-        self.config.remember_password = (state == Qt.Checked)
-        if not self.config.remember_password:
-            # 取消记住时清除保存的密码
-            self.config.password = ''
+        for task_widget in self.task_widgets:
+            task_widget.output_path_edit.setEnabled(not self.config.extract_to_source)
+            task_widget.browse_btn.setEnabled(not self.config.extract_to_source)
 
     def on_extract_to_source_changed(self, state: int) -> None:
         """解压到原目录复选框状态改变"""
         self.config.extract_to_source = (state == Qt.Checked)
-        self.output_path_edit.setEnabled(not self.config.extract_to_source)
-        self.browse_btn.setEnabled(not self.config.extract_to_source)
+        for task_widget in self.task_widgets:
+            task_widget.output_path_edit.setEnabled(not self.config.extract_to_source)
+            task_widget.browse_btn.setEnabled(not self.config.extract_to_source)
+
+    def on_use_unified_password_changed(self, state: int) -> None:
+        """使用统一密码复选框状态改变"""
+        self.config.use_unified_password = (state == Qt.Checked)
+        self.unified_password_combo.setEnabled(self.config.use_unified_password)
+
+    def manage_passwords(self) -> None:
+        """管理密码"""
+        dialog = PasswordManagerDialog(self.password_manager, self)
+        if dialog.exec_() == QDialog.Accepted:
+            # 更新所有任务的密码下拉框
+            saved_passwords = self.password_manager.get_all()
+            for task_widget in self.task_widgets:
+                task_widget.update_saved_passwords(saved_passwords)
 
     def save_settings(self) -> None:
         """保存设置"""
         self.config.winrar_path = self.winrar_path_edit.text().strip()
-        self.config.output_dir = self.output_path_edit.text().strip()
         self.config.extract_to_source = self.config.extract_to_source
-        self.config.remember_password = self.config.remember_password
-        self.config.password = self.password_edit.text().strip() if self.config.remember_password else ''
+        self.config.use_unified_password = self.config.use_unified_password
+        self.config.unified_password = self.unified_password_combo.currentText().strip()
+        self.config.saved_passwords = self.password_manager.get_all()
         save_config(self.config)
 
     def start_extract(self) -> None:
         """开始解压"""
-        if not self.selected_files:
-            QMessageBox.warning(self, '警告', '请先选择要解压的文件！')
+        # 收集所有任务
+        tasks = []
+        for task_widget in self.task_widgets:
+            files = task_widget.get_files()
+            if not files:
+                continue
+
+            output_dir = task_widget.get_output_dir()
+            password = task_widget.get_password()
+
+            tasks.append({
+                'files': files,
+                'output_dir': output_dir,
+                'password': password
+            })
+
+        if not tasks:
+            QMessageBox.warning(self, '警告', '请至少添加一个任务并选择文件！')
             return
 
         # 检查 WinRAR 路径
@@ -251,30 +407,37 @@ class ExtractorGUI(QMainWindow):
             )
             return
 
-        output_dir = self.output_path_edit.text()
-        # 如果是解压到原目录模式，不需要检查输出目录
-        if not self.config.extract_to_source and not Path(output_dir).is_dir():
-            QMessageBox.warning(self, '警告', '输出目录不存在！')
-            return
+        # 确定统一密码
+        unified_password = None
+        if self.config.use_unified_password:
+            unified_password = self.unified_password_combo.currentText().strip()
+            if not unified_password:
+                unified_password = None
 
-        password = self.password_edit.text().strip()
-        if not password:
-            password = None
+        # 验证输出目录（如果不是解压到原目录）
+        if not self.config.extract_to_source:
+            for task in tasks:
+                if task['output_dir'] is None:
+                    QMessageBox.warning(
+                        self,
+                        '警告',
+                        f'有一个任务的输出目录为空！\n\n请为每个任务设置输出目录或勾选"解压到原目录"。'
+                    )
+                    return
+
+                if not task['output_dir'].exists():
+                    QMessageBox.warning(
+                        self,
+                        '警告',
+                        f'输出目录不存在: {task["output_dir"]}'
+                    )
+                    return
 
         # 保存设置
         self.save_settings()
 
         # 禁用按钮
-        self.select_btn.setEnabled(False)
-        self.extract_btn.setEnabled(False)
-        self.clear_btn.setEnabled(False)
-        self.browse_btn.setEnabled(False)
-        self.browse_winrar_btn.setEnabled(False)
-        self.password_edit.setEnabled(False)
-        self.output_path_edit.setEnabled(False)
-        self.winrar_path_edit.setEnabled(False)
-        self.extract_to_source_cb.setEnabled(False)
-        self.remember_password_cb.setEnabled(False)
+        self._set_ui_enabled(False)
 
         # 清空日志
         self.log_list.clear()
@@ -282,21 +445,40 @@ class ExtractorGUI(QMainWindow):
 
         # 启动工作线程
         self.worker = ExtractWorker(
-            self.selected_files,
-            Path(output_dir),
-            password,
+            tasks,
             Path(winrar_path),
-            self.config.extract_to_source
+            extract_to_source=self.config.extract_to_source,
+            unified_password=unified_password
         )
         self.worker.progress_signal.connect(self.update_progress)
         self.worker.log_signal.connect(self.add_log)
         self.worker.finished_signal.connect(self.extract_finished)
         self.worker.start()
 
-    def update_progress(self, file_name: str, progress: int) -> None:
+    def _set_ui_enabled(self, enabled: bool) -> None:
+        """设置UI组件的启用状态"""
+        self.add_task_btn.setEnabled(enabled)
+        self.extract_btn.setEnabled(enabled)
+        self.browse_winrar_btn.setEnabled(enabled)
+        self.manage_passwords_btn.setEnabled(enabled)
+        self.unified_password_combo.setEnabled(enabled and self.config.use_unified_password)
+        self.extract_to_source_cb.setEnabled(enabled)
+        self.use_unified_password_cb.setEnabled(enabled)
+        self.winrar_path_edit.setEnabled(enabled)
+
+        for task_widget in self.task_widgets:
+            task_widget.delete_btn.setEnabled(enabled)
+            task_widget.select_btn.setEnabled(enabled)
+            task_widget.clear_btn.setEnabled(enabled)
+            task_widget.browse_btn.setEnabled(enabled and not self.config.extract_to_source)
+            task_widget.output_path_edit.setEnabled(enabled and not self.config.extract_to_source)
+            task_widget.password_combo.setEnabled(enabled and not self.config.use_unified_password)
+            task_widget.file_list.setEnabled(enabled)
+
+    def update_progress(self, task_name: str, progress: int) -> None:
         """更新进度"""
         self.progress_bar.setValue(progress)
-        self.status_label.setText(f'正在处理: {file_name}')
+        self.status_label.setText(f'正在处理: {task_name}')
 
     def add_log(self, message: str) -> None:
         """添加日志"""
@@ -305,24 +487,19 @@ class ExtractorGUI(QMainWindow):
 
     def extract_finished(self, success_count: int) -> None:
         """解压完成"""
-        self.select_btn.setEnabled(True)
-        self.extract_btn.setEnabled(True)
-        self.clear_btn.setEnabled(True)
-        self.browse_btn.setEnabled(True)
-        self.browse_winrar_btn.setEnabled(True)
-        self.password_edit.setEnabled(True)
-        self.output_path_edit.setEnabled(not self.config.extract_to_source)
-        self.browse_btn.setEnabled(not self.config.extract_to_source)
-        self.winrar_path_edit.setEnabled(True)
-        self.extract_to_source_cb.setEnabled(True)
-        self.remember_password_cb.setEnabled(True)
+        self._set_ui_enabled(True)
 
-        self.status_label.setText(f'解压完成！成功: {success_count}/{len(self.selected_files)}')
+        # 计算总文件数
+        total_files = 0
+        for task_widget in self.task_widgets:
+            total_files += len(task_widget.get_files())
+
+        self.status_label.setText(f'解压完成！成功: {success_count}/{total_files}')
 
         QMessageBox.information(
             self,
             '完成',
-            f'解压完成！\n\n成功: {success_count}\n失败: {len(self.selected_files) - success_count}'
+            f'解压完成！\n\n成功: {success_count}\n失败: {total_files - success_count}'
         )
 
         self.worker = None

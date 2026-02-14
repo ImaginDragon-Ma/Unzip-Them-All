@@ -5,7 +5,7 @@ import json
 import os
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from .constants import CONFIG_FILE
 
@@ -18,6 +18,9 @@ class Config:
     extract_to_source: bool = False
     remember_password: bool = False
     password: str = ''
+    saved_passwords: List[str] = field(default_factory=list)  # 保存的密码列表
+    use_unified_password: bool = False  # 是否使用统一密码
+    unified_password: str = ''  # 统一密码
 
     def to_dict(self) -> dict:
         """转换为字典"""

@@ -253,6 +253,50 @@ class FileExtractor:
 
         return True
 
+    def _extract_batch(
+        self,
+        files: List[Path],
+        output_dir: Path,
+        start_index: int,
+        total_files: int,
+        task_name: str
+    ) -> int:
+        """
+        批量解压文件（用于多任务模式）
+
+        Args:
+            files: 文件路径列表
+            output_dir: 输出目录
+            start_index: 起始文件索引（用于计算进度）
+            total_files: 总文件数
+            task_name: 任务名称
+
+        Returns:
+            int: 成功解压的文件数量
+        """
+        success_count = 0
+
+        for idx, file_path in enumerate(files):
+            if self._should_stop():
+                break
+
+            current_index = start_index + idx
+            self._log(f"正在处理 ({current_index+1}/{total_files}): {file_path.name} ({task_name})")
+            progress = int((current_index / total_files) * 100)
+            self._progress(task_name, progress)
+
+            try:
+                # 递归解压
+                if self._extract_recursive(file_path, output_dir):
+                    success_count += 1
+                    self._log(f"✓ 成功: {file_path.name}")
+                else:
+                    self._log(f"✗ 失败: {file_path.name}")
+            except Exception as e:
+                self._log(f"✗ 错误: {file_path.name} - {str(e)}")
+
+        return success_count
+
     def stop(self) -> None:
         """停止解压"""
         if self.should_stop_callback:

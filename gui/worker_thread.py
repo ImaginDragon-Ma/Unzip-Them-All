@@ -2,7 +2,7 @@
 """解压工作线程"""
 
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from PyQt5.QtCore import QThread, pyqtSignal
 
@@ -13,34 +13,31 @@ class ExtractWorker(QThread):
     """解压工作线程"""
 
     # 信号定义
-    progress_signal = pyqtSignal(str, int)  # (文件名, 进度百分比)
+    progress_signal = pyqtSignal(str, int)  # (任务名, 进度百分比)
     log_signal = pyqtSignal(str)  # 日志信息
     finished_signal = pyqtSignal(int)  # (成功数量)
 
     def __init__(
         self,
-        files: List[Path],
-        output_dir: Path,
-        password: Optional[str] = None,
-        winrar_path: Optional[Path] = None,
-        extract_to_source: bool = False
+        tasks: List[Dict[str, Any]],
+        winrar_path: Path,
+        extract_to_source: bool = False,
+        unified_password: Optional[str] = None
     ):
         """
         初始化工作线程
 
         Args:
-            files: 要解压的文件列表
-            output_dir: 输出目录
-            password: 解压密码
+            tasks: 任务列表，每个任务包含 files, output_dir, password
             winrar_path: WinRAR 路径
             extract_to_source: 是否解压到原目录
+            unified_password: 统一密码（如果启用）
         """
         super().__init__()
-        self.files = files
-        self.output_dir = output_dir
-        self.password = password
+        self.tasks = tasks
         self.winrar_path = winrar_path
         self.extract_to_source = extract_to_source
+        self.unified_password = unified_password
         self._running = True
         self._extractor: Optional[FileExtractor] = None
 
@@ -54,16 +51,73 @@ class ExtractWorker(QThread):
             should_stop_callback=self._should_stop
         )
 
-        # 执行解压
-        success_count = self._extractor.extract(
-            self.files,
-            self.output_dir,
-            password=self.password,
-            extract_to_source=self.extract_to_source
-        )
+        # 统计总文件数和成功数
+        total_files = 0
+        success_count = 0
+
+        # 计算总文件数
+        for task in self.tasks:
+            total_files += len(task['files'])
+
+        current_file = 0
+
+        # 逐个处理任务
+        for task_idx, task in enumerate(self.tasks):
+            if not self._running:
+                break
+
+            files = task['files']
+            output_dir = task['output_dir']
+            password = task['password']
+
+            # 如果使用统一密码，覆盖任务的密码
+            if self.unified_password:
+                password = self.unified_password
+
+            task_name = f'任务 {task_idx + 1} ({len(files)} 个文件)'
+
+            # 如果解压到原目录，使用每个文件的父目录作为输出目录
+            if self.extract_to_source:
+                # 为每个文件单独解压
+                for file_path in files:
+                    if not self._running:
+                        break
+
+                    self._log(f"正在处理 ({current_file+1}/{total_files}): {file_path.name} (任务 {task_idx + 1})")
+                    progress = int((current_file / total_files) * 100)
+                    self._progress(task_name, progress)
+
+                    try:
+                        target_output_dir = file_path.parent
+                        if self._extractor._extract_recursive(file_path, target_output_dir):
+                            success_count += 1
+                            self._log(f"✓ 成功: {file_path.name}")
+                        else:
+                            self._log(f"✗ 失败: {file_path.name}")
+                    except Exception as e:
+                        self._log(f"✗ 错误: {file_path.name} - {str(e)}")
+
+                    current_file += 1
+            else:
+                # 如果有统一的输出目录，解压所有文件到该目录
+                if output_dir:
+                    # 使用 FileExtractor 的 extract 方法批量解压
+                    if password:
+                        self._extractor.password = password
+
+                    task_success = self._extractor._extract_batch(
+                        files,
+                        output_dir,
+                        current_file,
+                        total_files,
+                        task_name
+                    )
+                    success_count += task_success
+
+                    current_file += len(files)
 
         # 发送完成信号
-        self.progress_signal.emit("完成", 100)
+        self._progress("完成", 100)
         self.finished_signal.emit(success_count)
 
     def stop(self) -> None:
@@ -80,4 +134,12 @@ class ExtractWorker(QThread):
 
     def _on_log(self, message: str) -> None:
         """日志回调"""
+        self.log_signal.emit(message)
+
+    def _progress(self, task_name: str, percent: int) -> None:
+        """发送进度信号"""
+        self.progress_signal.emit(task_name, percent)
+
+    def _log(self, message: str) -> None:
+        """发送日志信号"""
         self.log_signal.emit(message)
