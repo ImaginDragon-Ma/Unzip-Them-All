@@ -32,6 +32,11 @@ class TaskWidget(QFrame):
         self.task_config = TaskConfig()
         self.i18n = None
 
+        # UI 组件引用
+        self.task_label = None
+        self.output_label = None
+        self.password_label = None
+
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -39,15 +44,15 @@ class TaskWidget(QFrame):
         layout = QHBoxLayout(self)
 
         # 任务号
-        task_label = QLabel(f'#{self.task_index + 1}')
-        task_label.setFont(QFont('Arial', 10, QFont.Bold))
-        task_label.setMinimumWidth(30)
-        layout.addWidget(task_label)
+        self.task_label = QLabel(f'#{self.task_index + 1}')
+        self.task_label.setFont(QFont('Arial', 10, QFont.Bold))
+        self.task_label.setMinimumWidth(30)
+        layout.addWidget(self.task_label)
 
         # 输出目录
-        output_label = QLabel('输出:')
-        output_label.setMinimumWidth(35)
-        layout.addWidget(output_label)
+        self.output_label = QLabel('输出:')
+        self.output_label.setMinimumWidth(35)
+        layout.addWidget(self.output_label)
 
         self.output_path_edit = QLineEdit()
         self.output_path_edit.setFont(QFont('Arial', 9))
@@ -62,9 +67,9 @@ class TaskWidget(QFrame):
         layout.addWidget(self.browse_btn)
 
         # 密码
-        password_label = QLabel('密码:')
-        password_label.setMinimumWidth(35)
-        layout.addWidget(password_label)
+        self.password_label = QLabel('密码:')
+        self.password_label.setMinimumWidth(35)
+        layout.addWidget(self.password_label)
 
         self.password_combo = QComboBox()
         self.password_combo.setEditable(True)
@@ -219,19 +224,12 @@ class TaskWidget(QFrame):
             return
         self.i18n = i18n
 
-        # 获取布局中的标签和按钮
-        layout = self.layout()
-        task_label = layout.itemAt(0).widget()
-        output_label = layout.itemAt(1).widget()
-        password_label = layout.itemAt(3).widget()
-        file_info_label = layout.itemAt(5).widget()
-
-        task_label.setText(f'#{self.task_index + 1}')
-        output_label.setText(i18n.get('output'))
-        password_label.setText(i18n.get('password'))
+        self.task_label.setText(f'#{self.task_index + 1}')
+        self.output_label.setText(i18n.get('output'))
+        self.password_label.setText(i18n.get('password'))
         self.output_path_edit.setPlaceholderText(i18n.get('select_output_dir'))
         self.password_combo.setPlaceholderText(i18n.get('no_password'))
-        file_info_label.setText(i18n.get('file_count', len(self.task_config.files)))
+        self.file_info_label.setText(i18n.get('file_count', len(self.task_config.files)))
         self.select_btn.setText(i18n.get('select_files'))
         self.clear_btn.setText(i18n.get('clear'))
         self.delete_btn.setText(i18n.get('delete_task'))
