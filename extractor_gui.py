@@ -18,17 +18,80 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 
 
+def find_winrar_path():
+    """
+    查找 WinRAR 可执行文件的路径
+
+    Returns:
+        str: WinRAR 完整路径，如果找不到返回 None
+    """
+    import glob
+
+    # 1. 尝试从 PATH 环境变量查找
+    winrar_path = shutil.which('winrar')
+    if winrar_path:
+        return winrar_path
+
+    # 2. 尝试从 PATH 环境变量查找 winrar.exe
+    winrar_path = shutil.which('winrar.exe')
+    if winrar_path:
+        return winrar_path
+
+    # 3. 尝试常见的安装路径
+    common_paths = [
+        r'C:\Program Files\WinRAR\WinRAR.exe',
+        r'C:\Program Files (x86)\WinRAR\WinRAR.exe',
+        r'C:\WinRAR\WinRAR.exe',
+        r'D:\Program Files\WinRAR\WinRAR.exe',
+        r'D:\Program Files (x86)\WinRAR\WinRAR.exe',
+        r'D:\WinRAR\WinRAR.exe',
+        os.path.join(os.environ.get('ProgramFiles', ''), 'WinRAR', 'WinRAR.exe'),
+        os.path.join(os.environ.get('ProgramFiles(x86)', ''), 'WinRAR', 'WinRAR.exe'),
+    ]
+
+    for path in common_paths:
+        if os.path.exists(path):
+            return path
+
+    # 4. 使用 glob 搜索多个驱动器
+    for drive in ['C', 'D', 'E', 'F']:
+        try:
+            # 搜索 Program Files 和 Program Files (x86)
+            matches = glob.glob(f'{drive}:\\Program Files*\\WinRAR\\WinRAR.exe')
+            for match in matches:
+                if os.path.exists(match):
+                    return match
+        except Exception:
+            pass
+
+    # 5. 尝试从系统环境变量 PATH 搜索
+    path_env = os.environ.get('PATH', '')
+    for dir_path in path_env.split(os.pathsep):
+        try:
+            potential_path = os.path.join(dir_path, 'winrar.exe')
+            if os.path.exists(potential_path):
+                return potential_path
+            potential_path = os.path.join(dir_path, 'winrar')
+            if os.path.exists(potential_path):
+                return potential_path
+        except Exception:
+            pass
+
+    return None
+
+
 class ExtractWorker(QThread):
     """解压工作线程"""
     progress_signal = pyqtSignal(str, int)  # (文件名, 进度百分比)
     log_signal = pyqtSignal(str)  # 日志信息
     finished_signal = pyqtSignal(int)  # (成功数量)
 
-    def __init__(self, files, output_dir, password=None):
+    def __init__(self, files, output_dir, password=None, winrar_path=None):
         super().__init__()
         self.files = files
         self.output_dir = output_dir
         self.password = password
+        self.winrar_path = winrar_path
         self.running = True
 
     def run(self):
@@ -150,34 +213,67 @@ class ExtractWorker(QThread):
         # -inul: 禁用所有消息
         # -p: 密码
 
-        cmd = ['winrar', 'x', '-y', '-o+', '-inul']
+        # 方法1: 使用完整路径
+        if self.winrar_path and os.path.exists(self.winrar_path):
+            cmd = [self.winrar_path, 'x', '-y', '-o+', '-inul']
+            if self.password:
+                cmd.append(f'-p{self.password}')
+            cmd.extend([file_path, output_dir + os.sep])
 
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    encoding='gbk',
+                    errors='ignore'
+                )
+
+                if result.returncode in [0, 1]:
+                    return True
+                else:
+                    self.log_signal.emit(f"  [WinRAR] 返回码: {result.returncode}")
+                    if result.stderr:
+                        self.log_signal.emit(f"  [WinRAR] 错误: {result.stderr}")
+                    if result.stdout:
+                        self.log_signal.emit(f"  [WinRAR] 输出: {result.stdout}")
+                    return False
+            except FileNotFoundError:
+                self.log_signal.emit(f"  [警告] 无法使用路径: {self.winrar_path}")
+            except Exception as e:
+                self.log_signal.emit(f"  [错误] 解压失败: {str(e)}")
+
+        # 方法2: 使用 shell=True 后备方案
+        self.log_signal.emit("  [尝试] 使用 shell 方式调用 WinRAR...")
+        cmd_str = f'winrar x -y -o+ -inul'
         if self.password:
-            cmd.append(f'-p{self.password}')
-
-        cmd.extend([file_path, output_dir + os.sep])
+            cmd_str += f' -p{self.password}'
+        cmd_str += f' "{file_path}" "{output_dir}\\"'
 
         try:
             result = subprocess.run(
-                cmd,
+                cmd_str,
+                shell=True,
                 capture_output=True,
                 text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                encoding='gbk',
+                errors='ignore'
             )
 
-            # WinRAR 返回码: 0=成功, 其他=失败
-            if result.returncode in [0, 1]:  # 0=成功, 1=警告但成功
+            if result.returncode in [0, 1]:
+                self.log_signal.emit("  [成功] shell 方式调用成功")
                 return True
             else:
                 self.log_signal.emit(f"  [WinRAR] 返回码: {result.returncode}")
                 if result.stderr:
                     self.log_signal.emit(f"  [WinRAR] 错误: {result.stderr}")
+                if result.stdout:
+                    self.log_signal.emit(f"  [WinRAR] 输出: {result.stdout}")
                 return False
-        except FileNotFoundError:
-            self.log_signal.emit("  [错误] 未找到 WinRAR，请确认已安装 WinRAR")
-            return False
         except Exception as e:
-            self.log_signal.emit(f"  [错误] 解压失败: {str(e)}")
+            self.log_signal.emit(f"  [错误] shell 方式调用失败: {str(e)}")
             return False
 
     def is_archive_file(self, file_path):
@@ -246,6 +342,7 @@ class ExtractorGUI(QMainWindow):
         super().__init__()
         self.selected_files = []
         self.worker = None
+        self.winrar_path = find_winrar_path()
         self.init_ui()
 
     def init_ui(self):
@@ -259,6 +356,25 @@ class ExtractorGUI(QMainWindow):
 
         # 主布局
         main_layout = QVBoxLayout(central_widget)
+
+        # WinRAR 路径选择
+        winrar_layout = QHBoxLayout()
+        winrar_layout.addWidget(QLabel('WinRAR 路径:'))
+        self.winrar_path_edit = QLineEdit(self.winrar_path if self.winrar_path else '')
+        self.winrar_path_edit.setFont(QFont('Arial', 9))
+        self.winrar_path_edit.setPlaceholderText('点击浏览选择 WinRAR.exe')
+        winrar_layout.addWidget(self.winrar_path_edit)
+
+        self.browse_winrar_btn = QPushButton('浏览...')
+        self.browse_winrar_btn.clicked.connect(self.browse_winrar)
+        winrar_layout.addWidget(self.browse_winrar_btn)
+
+        # WinRAR 状态
+        self.winrar_status = QLabel('✓' if self.winrar_path else '✗ 未找到')
+        self.winrar_status.setStyleSheet('color: green' if self.winrar_path else 'color: red')
+        winrar_layout.addWidget(self.winrar_status)
+
+        main_layout.addLayout(winrar_layout)
 
         # 文件选择组
         file_group = QGroupBox('文件选择')
@@ -365,10 +481,35 @@ class ExtractorGUI(QMainWindow):
         if dir_path:
             self.output_path_edit.setText(dir_path)
 
+    def browse_winrar(self):
+        """浏览 WinRAR 可执行文件"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            '选择 WinRAR 可执行文件',
+            'C:\\Program Files',
+            'WinRAR (WinRAR.exe);;所有文件 (*.*)'
+        )
+
+        if file_path:
+            self.winrar_path = file_path
+            self.winrar_path_edit.setText(file_path)
+            self.winrar_status.setText('✓')
+            self.winrar_status.setStyleSheet('color: green')
+
     def start_extract(self):
         """开始解压"""
         if not self.selected_files:
             QMessageBox.warning(self, '警告', '请先选择要解压的文件！')
+            return
+
+        # 检查 WinRAR 路径
+        winrar_path = self.winrar_path_edit.text().strip()
+        if not winrar_path or not os.path.exists(winrar_path):
+            QMessageBox.warning(
+                self,
+                '警告',
+                '未找到 WinRAR！\n\n请点击"浏览..."按钮选择 WinRAR.exe 的位置。'
+            )
             return
 
         output_dir = self.output_path_edit.text()
@@ -385,15 +526,17 @@ class ExtractorGUI(QMainWindow):
         self.extract_btn.setEnabled(False)
         self.clear_btn.setEnabled(False)
         self.browse_btn.setEnabled(False)
+        self.browse_winrar_btn.setEnabled(False)
         self.password_edit.setEnabled(False)
         self.output_path_edit.setEnabled(False)
+        self.winrar_path_edit.setEnabled(False)
 
         # 清空日志
         self.log_list.clear()
         self.status_label.setText('正在解压...')
 
         # 启动工作线程
-        self.worker = ExtractWorker(self.selected_files, output_dir, password)
+        self.worker = ExtractWorker(self.selected_files, output_dir, password, winrar_path)
         self.worker.progress_signal.connect(self.update_progress)
         self.worker.log_signal.connect(self.add_log)
         self.worker.finished_signal.connect(self.extract_finished)
@@ -415,8 +558,10 @@ class ExtractorGUI(QMainWindow):
         self.extract_btn.setEnabled(True)
         self.clear_btn.setEnabled(True)
         self.browse_btn.setEnabled(True)
+        self.browse_winrar_btn.setEnabled(True)
         self.password_edit.setEnabled(True)
         self.output_path_edit.setEnabled(True)
+        self.winrar_path_edit.setEnabled(True)
 
         self.status_label.setText(f'解压完成！成功: {success_count}/{len(self.selected_files)}')
 
