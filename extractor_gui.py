@@ -155,15 +155,16 @@ class ExtractWorker(QThread):
         self.progress_signal.emit("完成", 100)
         self.finished_signal.emit(success_count)
 
-    def extract_file_recursive(self, file_path, output_dir, depth=0, max_depth=10):
+    def extract_file_recursive(self, file_path, output_dir, depth=0, max_depth=10, final_output_dir=None):
         """
         递归解压文件
 
         Args:
             file_path: 文件路径
-            output_dir: 输出目录
+            output_dir: 当前解压输出目录
             depth: 当前递归深度
             max_depth: 最大递归深度（防止无限循环）
+            final_output_dir: 最终根目录（所有非压缩文件的最终目的地）
 
         Returns:
             bool: 是否成功解压
@@ -175,6 +176,10 @@ class ExtractWorker(QThread):
         if not os.path.exists(file_path):
             self.log_signal.emit(f"  [错误] 文件不存在: {file_path}")
             return False
+
+        # 如果没有指定 final_output_dir，使用当前的 output_dir
+        if final_output_dir is None:
+            final_output_dir = output_dir
 
         # 创建临时解压目录
         temp_dir = os.path.join(output_dir, f"temp_extract_{depth}")
@@ -237,14 +242,14 @@ class ExtractWorker(QThread):
 
             for archive_file in archive_files:
                 self.extract_file_recursive(
-                    archive_file, inner_output, depth + 1, max_depth
+                    archive_file, inner_output, depth + 1, max_depth, final_output_dir
                 )
 
-        # 将非压缩文件移动到根目录
+        # 将非压缩文件移动到最终根目录
         if non_archive_files:
             self.log_signal.emit(f"  移动 {len(non_archive_files)} 个非压缩文件到根目录...")
             for non_archive_file in non_archive_files:
-                dest_path = os.path.join(output_dir, os.path.basename(non_archive_file))
+                dest_path = os.path.join(final_output_dir, os.path.basename(non_archive_file))
                 # 处理同名文件
                 if os.path.exists(dest_path):
                     base, ext = os.path.splitext(dest_path)
