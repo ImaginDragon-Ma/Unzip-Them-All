@@ -245,24 +245,58 @@ class ExtractWorker(QThread):
                     archive_file, inner_output, depth + 1, max_depth, final_output_dir
                 )
 
-        # 将非压缩文件移动到最终根目录
+        # 将非压缩文件/文件夹移动到最终根目录
         if non_archive_files:
-            self.log_signal.emit(f"  移动 {len(non_archive_files)} 个非压缩文件到根目录...")
-            for non_archive_file in non_archive_files:
-                dest_path = os.path.join(final_output_dir, os.path.basename(non_archive_file))
-                # 处理同名文件
-                if os.path.exists(dest_path):
-                    base, ext = os.path.splitext(dest_path)
-                    counter = 1
-                    while os.path.exists(f"{base}_{counter}{ext}"):
-                        counter += 1
-                    dest_path = f"{base}_{counter}{ext}"
-                    self.log_signal.emit(f"    同名文件重命名: {os.path.basename(non_archive_file)} → {os.path.basename(dest_path)}")
+            self.log_signal.emit(f"  移动 {len(non_archive_files)} 个非压缩文件/文件夹到根目录...")
 
-                # 移动文件（保持原文件名）
-                if os.path.exists(non_archive_file):
-                    shutil.move(non_archive_file, dest_path)
-                    self.log_signal.emit(f"  → 已移动: {os.path.basename(dest_path)}")
+            # 统计源目录相对于 temp_dir 的前缀路径
+            # 我们需要保持目录结构，所以找出相对路径
+            for source_path in non_archive_files:
+                # 获取相对于 temp_dir 的相对路径
+                rel_path = os.path.relpath(source_path, temp_dir)
+                dest_path = os.path.join(final_output_dir, rel_path)
+
+                # 如果源是目录，递归处理
+                if os.path.isdir(source_path):
+                    # 处理同名目录
+                    if os.path.exists(dest_path):
+                        # 检查目录内的文件是否冲突
+                        self.log_signal.emit(f"  [警告] 目标目录已存在: {rel_path}")
+                        # 可以选择合并或重命名，这里选择重命名
+                        base_name = rel_path
+                        counter = 1
+                        while os.path.exists(os.path.join(final_output_dir, f"{base_name}_{counter}")):
+                            counter += 1
+                        new_dest = os.path.join(final_output_dir, f"{base_name}_{counter}")
+                        shutil.move(source_path, new_dest)
+                        self.log_signal.emit(f"    目录重命名移动: {rel_path} → {os.path.basename(new_dest)}")
+                    else:
+                        # 确保目标父目录存在
+                        dest_parent = os.path.dirname(dest_path)
+                        if dest_parent:
+                            os.makedirs(dest_parent, exist_ok=True)
+                        shutil.move(source_path, dest_path)
+                        self.log_signal.emit(f"  → 已移动目录: {rel_path}")
+                else:
+                    # 源是文件，保持目录结构
+                    # 确保目标父目录存在
+                    dest_parent = os.path.dirname(dest_path)
+                    if dest_parent:
+                        os.makedirs(dest_parent, exist_ok=True)
+
+                    # 处理同名文件
+                    if os.path.exists(dest_path):
+                        base, ext = os.path.splitext(dest_path)
+                        counter = 1
+                        while os.path.exists(f"{base}_{counter}{ext}"):
+                            counter += 1
+                        dest_path = f"{base}_{counter}{ext}"
+                        self.log_signal.emit(f"    同名文件重命名: {rel_path} → {os.path.relpath(dest_path, final_output_dir)}")
+
+                    # 移动文件
+                    if os.path.exists(source_path):
+                        shutil.move(source_path, dest_path)
+                        self.log_signal.emit(f"  → 已移动文件: {rel_path}")
 
         # 清理临时目录
         if os.path.exists(temp_dir):
