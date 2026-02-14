@@ -42,62 +42,64 @@ class TaskWidget(QFrame):
     def init_ui(self) -> None:
         """初始化界面"""
         layout = QHBoxLayout(self)
+        layout.setSpacing(6)
 
         # 任务号
         self.task_label = QLabel(f'#{self.task_index + 1}')
         self.task_label.setFont(QFont('Arial', 10, QFont.Bold))
-        self.task_label.setMinimumWidth(30)
+        self.task_label.setMinimumWidth(35)
         layout.addWidget(self.task_label)
 
         # 输出目录
         self.output_label = QLabel('输出:')
-        self.output_label.setMinimumWidth(35)
+        self.output_label.setMinimumWidth(40)
         layout.addWidget(self.output_label)
 
         self.output_path_edit = QLineEdit()
         self.output_path_edit.setFont(QFont('Arial', 9))
         self.output_path_edit.setPlaceholderText('选择输出目录...')
-        self.output_path_edit.setMinimumWidth(200)
-        layout.addWidget(self.output_path_edit)
+        self.output_path_edit.setMinimumWidth(300)
+        self.output_path_edit.setMaximumWidth(400)
+        layout.addWidget(self.output_path_edit, 1)
 
         self.browse_btn = QPushButton('...')
-        self.browse_btn.setMaximumWidth(30)
+        self.browse_btn.setMaximumWidth(35)
         self.browse_btn.setToolTip('浏览输出目录')
         self.browse_btn.clicked.connect(self.browse_output_dir)
         layout.addWidget(self.browse_btn)
 
         # 密码
         self.password_label = QLabel('密码:')
-        self.password_label.setMinimumWidth(35)
+        self.password_label.setMinimumWidth(40)
         layout.addWidget(self.password_label)
 
         self.password_combo = QComboBox()
         self.password_combo.setEditable(True)
         self.password_combo.setPlaceholderText('无密码')
-        self.password_combo.setMinimumWidth(120)
+        self.password_combo.setMinimumWidth(150)
         self._update_password_combo()
-        layout.addWidget(self.password_combo)
+        layout.addWidget(self.password_combo, 1)
 
         # 文件信息
         self.file_info_label = QLabel('文件: 0')
-        self.file_info_label.setMinimumWidth(60)
+        self.file_info_label.setMinimumWidth(70)
         layout.addWidget(self.file_info_label)
 
         # 选择文件按钮
         self.select_btn = QPushButton('选择文件')
-        self.select_btn.setMaximumWidth(70)
+        self.select_btn.setMinimumWidth(80)
         self.select_btn.clicked.connect(self.select_files)
         layout.addWidget(self.select_btn)
 
         # 清空按钮
         self.clear_btn = QPushButton('清空')
-        self.clear_btn.setMaximumWidth(50)
+        self.clear_btn.setMinimumWidth(55)
         self.clear_btn.clicked.connect(self.clear_files)
         layout.addWidget(self.clear_btn)
 
         # 删除任务按钮
         self.delete_btn = QPushButton('×')
-        self.delete_btn.setMaximumWidth(30)
+        self.delete_btn.setMaximumWidth(35)
         self.delete_btn.setToolTip('删除此任务')
         self.delete_btn.setStyleSheet('QPushButton { color: red; font-weight: bold; }')
         if self.on_delete:
@@ -227,6 +229,17 @@ class TaskWidget(QFrame):
         self.task_label.setText(f'#{self.task_index + 1}')
         self.output_label.setText(i18n.get('output'))
         self.password_label.setText(i18n.get('password'))
+
+        # 根据语言调整宽度
+        if i18n.language == 'en':
+            self.output_path_edit.setMinimumWidth(280)
+            self.password_combo.setMinimumWidth(130)
+            self.select_btn.setMinimumWidth(75)
+        else:
+            self.output_path_edit.setMinimumWidth(300)
+            self.password_combo.setMinimumWidth(150)
+            self.select_btn.setMinimumWidth(80)
+
         self.output_path_edit.setPlaceholderText(i18n.get('select_output_dir'))
         self.password_combo.setPlaceholderText(i18n.get('no_password'))
         self.file_info_label.setText(i18n.get('file_count', len(self.task_config.files)))

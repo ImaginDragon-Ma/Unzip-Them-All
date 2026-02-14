@@ -171,7 +171,8 @@ class ExtractorGUI(QMainWindow):
     def init_ui(self) -> None:
         """初始化界面"""
         self.setWindowTitle('')
-        self.setGeometry(300, 300, 950, 700)
+        self.setGeometry(300, 300, 1200, 700)
+        self.setMinimumWidth(1100)
 
         # 中央窗口
         central_widget = QWidget()
@@ -266,9 +267,13 @@ class ExtractorGUI(QMainWindow):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setMinimumHeight(250)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         self.tasks_container = QWidget()
+        self.tasks_container.setMinimumWidth(1000)
         self.tasks_layout = QVBoxLayout(self.tasks_container)
+        self.tasks_layout.setSpacing(8)
         self.tasks_layout.addStretch()  # 添加伸缩项
         scroll_area.setWidget(self.tasks_container)
 
