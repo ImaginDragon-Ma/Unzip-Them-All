@@ -206,27 +206,45 @@ class ExtractWorker(QThread):
 
         # 检查解压后的文件是否还有压缩文件
         has_archive = False
+        archive_files = []
+        non_archive_files = []
+
         for extracted_file in extracted_files:
-            # 先修正扩展名，再检查是否为压缩文件
+            # 使用新的识别方法
+            is_archive, format_name, reason = self.check_and_identify_archive(extracted_file)
+
+            # 先修正扩展名（如果需要）
             fixed_file = self.fix_archive_extension(extracted_file)
+            file_basename = os.path.basename(fixed_file)
 
-            if self.is_archive_file(fixed_file):
+            if is_archive:
                 has_archive = True
-                # 递归解压
-                self.log_signal.emit(f"  发现嵌套压缩: {os.path.basename(fixed_file)}")
-                inner_output = os.path.join(output_dir, os.path.splitext(os.path.basename(corrected_path))[0])
-                os.makedirs(inner_output, exist_ok=True)
+                archive_files.append(fixed_file)
+                self.log_signal.emit(f"  ✓ 压缩文件: {file_basename}")
+                self.log_signal.emit(f"    格式: {format_name}")
+                self.log_signal.emit(f"    理由: {reason}")
+            else:
+                non_archive_files.append(fixed_file)
+                self.log_signal.emit(f"  ✗ 非压缩文件: {file_basename}")
+                self.log_signal.emit(f"    识别: {format_name}")
+                self.log_signal.emit(f"    理由: {reason}")
 
+        # 递归解压嵌套的压缩文件
+        if archive_files:
+            self.log_signal.emit(f"  开始处理 {len(archive_files)} 个嵌套压缩文件...")
+            inner_output = os.path.join(output_dir, os.path.splitext(os.path.basename(corrected_path))[0])
+            os.makedirs(inner_output, exist_ok=True)
+
+            for archive_file in archive_files:
                 self.extract_file_recursive(
-                    fixed_file, inner_output, depth + 1, max_depth
+                    archive_file, inner_output, depth + 1, max_depth
                 )
 
         # 将非压缩文件移动到根目录
-        for extracted_file in extracted_files:
-            # 先修正扩展名
-            fixed_file = self.fix_archive_extension(extracted_file)
-            if not self.is_archive_file(fixed_file) or depth > 0:
-                dest_path = os.path.join(output_dir, os.path.basename(fixed_file))
+        if non_archive_files:
+            self.log_signal.emit(f"  移动 {len(non_archive_files)} 个非压缩文件到根目录...")
+            for non_archive_file in non_archive_files:
+                dest_path = os.path.join(output_dir, os.path.basename(non_archive_file))
                 # 处理同名文件
                 if os.path.exists(dest_path):
                     base, ext = os.path.splitext(dest_path)
@@ -234,9 +252,10 @@ class ExtractWorker(QThread):
                     while os.path.exists(f"{base}_{counter}{ext}"):
                         counter += 1
                     dest_path = f"{base}_{counter}{ext}"
+                    self.log_signal.emit(f"    同名文件重命名: {os.path.basename(non_archive_file)} → {os.path.basename(dest_path)}")
 
                 # 移动文件（使用修正后的路径，如果修正成功的话）
-                src_file = fixed_file if os.path.exists(fixed_file) else extracted_file
+                src_file = non_archive_file if os.path.exists(non_archive_file) else extracted_file
                 if os.path.exists(src_file):
                     shutil.move(src_file, dest_path)
                     self.log_signal.emit(f"  → 已移动: {os.path.basename(dest_path)}")
@@ -320,12 +339,125 @@ class ExtractWorker(QThread):
             return False
 
     def is_archive_file(self, file_path):
-        """判断文件是否为压缩文件"""
+        """判断文件是否为压缩文件（简单版，只检查扩展名）"""
         archive_extensions = {
             '.zip', '.rar', '.7z', '.tar', '.gz', '.bz2', '.xz',
             '.001', '.002', '.003', '.004', '.005',  # 分卷压缩
         }
         return os.path.splitext(file_path)[1].lower() in archive_extensions
+
+    def check_and_identify_archive(self, file_path):
+        """
+        检查文件是否为压缩文件，并返回详细信息
+
+        Returns:
+            tuple: (是否为压缩文件, 压缩格式, 理由)
+        """
+        # 常见压缩文件的魔数
+        magic_numbers = {
+            b'\x50\x4B\x03\x04': ('ZIP', '.zip'),
+            b'\x50\x4B\x05\x06': ('ZIP', '.zip'),
+            b'\x50\x4B\x07\x08': ('ZIP', '.zip'),
+            b'\x52\x61\x72\x21': ('RAR', '.rar'),
+            b'\x52\x61\x72\x21\x1A\x07': ('RAR v5', '.rar'),
+            b'\x37\x7A\xBC\xAF\x27\x1C': ('7Z', '.7z'),
+            b'\x1F\x8B': ('GZIP', '.gz'),
+            b'\x42\x5A\x68': ('BZIP2', '.bz2'),
+            b'\xFD\x37\x7A\x58\x5A\x00': ('XZ', '.xz'),
+            # 其他可能的可识别文件
+            b'\x25\x50\x44\x46': ('PDF', '.pdf'),
+            b'\x50\x33\x52\x33': ('MP3', '.mp3'),
+            b'\x00\x00\x00': ('MP4/RAR', None),  # 需要进一步判断
+        }
+
+        filename = os.path.basename(file_path)
+        file_size = 0
+
+        # 检查文件是否存在和大小
+        if not os.path.exists(file_path):
+            return (False, None, f"文件不存在")
+
+        try:
+            file_size = os.path.getsize(file_path)
+            if file_size == 0:
+                return (False, None, f"文件大小为 0 字节")
+        except Exception:
+            pass
+
+        # 读取文件头
+        header = b''
+        try:
+            with open(file_path, 'rb') as f:
+                header = f.read(16)  # 读取更多字节以便更准确判断
+        except Exception as e:
+            return (False, None, f"无法读取文件头: {str(e)}")
+
+        if len(header) < 4:
+            return (False, None, f"文件头长度不足 ({len(header)} 字节)")
+
+        # 1. 通过文件头魔数判断
+        for magic, (format_name, ext) in magic_numbers.items():
+            if header.startswith(magic):
+                # 找到了魔数匹配
+                current_ext = os.path.splitext(file_path)[1].lower()
+
+                # 如果是 MP4（和 RAR v5 的开头可能冲突）
+                if magic == b'\x00\x00\x00':
+                    if header.startswith(b'\x00\x00\x00\x18ftypmp42') or \
+                       header.startswith(b'\x00\x00\x00\x20ftypisom'):
+                        return (False, 'MP4', f"文件头识别为 MP4 视频文件，不是压缩文件")
+
+                # 检查扩展名是否匹配
+                if ext and current_ext != ext:
+                    if ext in ['.zip', '.rar', '.7z', '.gz']:
+                        return (True, format_name,
+                               f"文件头识别为 {format_name} 格式，但扩展名是 {current_ext}")
+
+                if ext in ['.zip', '.rar', '.7z', '.gz', '.bz2', '.xz', '.tar']:
+                    return (True, format_name,
+                           f"文件头识别为 {format_name} 格式")
+
+                return (False, format_name,
+                       f"文件头识别为 {format_name} 格式，不是压缩文件")
+
+        # 2. 通过扩展名判断（文件头无法识别的情况）
+        current_ext = os.path.splitext(file_path)[1].lower()
+        archive_extensions = {
+            '.zip': 'ZIP', '.rar': 'RAR', '.7z': '7Z',
+            '.tar': 'TAR', '.gz': 'GZIP', '.bz2': 'BZIP2',
+            '.xz': 'XZ'
+        }
+
+        if current_ext in archive_extensions:
+            # 检查是否可能是文件头伪装的压缩文件（比如把 .exe 改名为 .zip）
+            # 如果扩展名是压缩格式，但文件头不匹配，给出警告
+            return (True, archive_extensions[current_ext],
+                   f"扩展名为 {current_ext}，但文件头无法识别（可能是损坏或加密的压缩文件）")
+
+        # 3. 分卷压缩判断
+        if current_ext in ['.001', '.002', '.003', '.004', '.005', '.006', '.007', '.008', '.009']:
+            return (True, '分卷压缩',
+                   f"扩展名为 {current_ext}，可能是分卷压缩文件")
+
+        # 4. 常见非压缩文件格式（通过扩展名排除）
+        non_archive_exts = {
+            '.txt': '文本文件', '.doc': 'Word', '.docx': 'Word',
+            '.xls': 'Excel', '.xlsx': 'Excel', '.ppt': 'PowerPoint',
+            '.pdf': 'PDF', '.jpg': 'JPEG', '.jpeg': 'JPEG',
+            '.png': 'PNG', '.gif': 'GIF', '.bmp': 'BMP',
+            '.mp3': 'MP3', '.mp4': 'MP4', '.avi': 'AVI',
+            '.mkv': 'MKV', '.flv': 'FLV', '.wmv': 'WMV',
+            '.exe': '可执行文件', '.dll': '动态链接库',
+            '.iso': 'ISO 镜像', '.img': 'IMG 镜像'
+        }
+
+        if current_ext in non_archive_exts:
+            return (False, non_archive_exts[current_ext],
+                   f"扩展名为 {current_ext}，识别为 {non_archive_exts[current_ext]}")
+
+        # 5. 无法识别
+        return (False, '未知格式',
+               f"无法识别文件格式（扩展名: {current_ext}, 文件大小: {file_size} 字节）")
 
     def fix_archive_extension(self, file_path):
         """
