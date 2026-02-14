@@ -3,104 +3,103 @@
 
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QListWidget, QComboBox, QFileDialog, QGroupBox
+    QWidget, QHBoxLayout, QLabel, QPushButton,
+    QLineEdit, QComboBox, QFileDialog, QFrame
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 
 from config.task_config import TaskConfig
 
+if TYPE_CHECKING:
+    from config.i18n import I18N
 
-class TaskWidget(QWidget):
-    """任务配置小组件"""
+
+class TaskWidget(QFrame):
+    """任务配置小组件 - 单行紧凑形式"""
 
     def __init__(self, task_index: int, saved_passwords: List[str], on_delete=None):
         super().__init__()
+        self.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
+        self.setLineWidth(1)
 
         self.task_index = task_index
         self.saved_passwords = saved_passwords
         self.on_delete = on_delete
         self.task_config = TaskConfig()
+        self.i18n = None
 
         self.init_ui()
 
     def init_ui(self) -> None:
         """初始化界面"""
-        layout = QVBoxLayout(self)
+        layout = QHBoxLayout(self)
 
-        # 任务标题
-        title_layout = QHBoxLayout()
-        title_label = QLabel(f'任务 {self.task_index + 1}')
-        title_label.setFont(QFont('Arial', 11, QFont.Bold))
-        title_layout.addWidget(title_label)
-        title_layout.addStretch()
-
-        # 删除任务按钮
-        self.delete_btn = QPushButton('删除任务')
-        self.delete_btn.setMaximumWidth(80)
-        if self.on_delete:
-            self.delete_btn.clicked.connect(lambda: self.on_delete(self.task_index))
-        title_layout.addWidget(self.delete_btn)
-
-        layout.addLayout(title_layout)
+        # 任务号
+        task_label = QLabel(f'#{self.task_index + 1}')
+        task_label.setFont(QFont('Arial', 10, QFont.Bold))
+        task_label.setMinimumWidth(30)
+        layout.addWidget(task_label)
 
         # 输出目录
-        output_layout = QHBoxLayout()
-        output_layout.addWidget(QLabel('输出目录:'))
+        output_label = QLabel('输出:')
+        output_label.setMinimumWidth(35)
+        layout.addWidget(output_label)
+
         self.output_path_edit = QLineEdit()
         self.output_path_edit.setFont(QFont('Arial', 9))
-        self.output_path_edit.setPlaceholderText('选择输出目录或留空使用默认')
-        output_layout.addWidget(self.output_path_edit)
+        self.output_path_edit.setPlaceholderText('选择输出目录...')
+        self.output_path_edit.setMinimumWidth(200)
+        layout.addWidget(self.output_path_edit)
 
-        self.browse_btn = QPushButton('浏览...')
-        self.browse_btn.setMaximumWidth(60)
+        self.browse_btn = QPushButton('...')
+        self.browse_btn.setMaximumWidth(30)
+        self.browse_btn.setToolTip('浏览输出目录')
         self.browse_btn.clicked.connect(self.browse_output_dir)
-        output_layout.addWidget(self.browse_btn)
+        layout.addWidget(self.browse_btn)
 
-        layout.addLayout(output_layout)
+        # 密码
+        password_label = QLabel('密码:')
+        password_label.setMinimumWidth(35)
+        layout.addWidget(password_label)
 
-        # 密码选择
-        password_layout = QHBoxLayout()
-        password_layout.addWidget(QLabel('解压密码:'))
-
-        # 密码下拉框
         self.password_combo = QComboBox()
         self.password_combo.setEditable(True)
-        self.password_combo.setPlaceholderText('无密码可留空')
+        self.password_combo.setPlaceholderText('无密码')
+        self.password_combo.setMinimumWidth(120)
         self._update_password_combo()
-        password_layout.addWidget(self.password_combo, 1)
+        layout.addWidget(self.password_combo)
 
-        layout.addLayout(password_layout)
+        # 文件信息
+        self.file_info_label = QLabel('文件: 0')
+        self.file_info_label.setMinimumWidth(60)
+        layout.addWidget(self.file_info_label)
 
-        # 文件选择
-        file_group = QGroupBox('文件列表')
-        file_layout = QVBoxLayout()
-
-        # 文件列表
-        self.file_list = QListWidget()
-        self.file_list.setFont(QFont('Arial', 9))
-        file_layout.addWidget(self.file_list)
-
-        # 按钮布局
-        btn_layout = QHBoxLayout()
-
+        # 选择文件按钮
         self.select_btn = QPushButton('选择文件')
-        self.select_btn.setMaximumWidth(80)
+        self.select_btn.setMaximumWidth(70)
         self.select_btn.clicked.connect(self.select_files)
-        btn_layout.addWidget(self.select_btn)
+        layout.addWidget(self.select_btn)
 
+        # 清空按钮
         self.clear_btn = QPushButton('清空')
-        self.clear_btn.setMaximumWidth(60)
+        self.clear_btn.setMaximumWidth(50)
         self.clear_btn.clicked.connect(self.clear_files)
-        btn_layout.addWidget(self.clear_btn)
+        layout.addWidget(self.clear_btn)
 
-        file_layout.addLayout(btn_layout)
-        file_group.setLayout(file_layout)
-        layout.addWidget(file_group)
+        # 删除任务按钮
+        self.delete_btn = QPushButton('×')
+        self.delete_btn.setMaximumWidth(30)
+        self.delete_btn.setToolTip('删除此任务')
+        self.delete_btn.setStyleSheet('QPushButton { color: red; font-weight: bold; }')
+        if self.on_delete:
+            self.delete_btn.clicked.connect(lambda: self.on_delete(self.task_index))
+        layout.addWidget(self.delete_btn)
+
+        layout.addStretch()
 
     def _update_password_combo(self) -> None:
         """更新密码下拉框"""
@@ -150,12 +149,20 @@ class TaskWidget(QWidget):
                 file_path = Path(file_str)
                 if file_path not in self.task_config.get_file_paths():
                     self.task_config.add_file(file_path)
-                    self.file_list.addItem(file_path.name)
+            self._update_file_info()
 
     def clear_files(self) -> None:
         """清空文件列表"""
         self.task_config.files.clear()
-        self.file_list.clear()
+        self._update_file_info()
+
+    def _update_file_info(self) -> None:
+        """更新文件信息显示"""
+        count = len(self.task_config.files)
+        if self.i18n:
+            self.file_info_label.setText(self.i18n.get('file_count', count))
+        else:
+            self.file_info_label.setText(f'文件: {count}')
 
     def get_output_dir(self) -> Optional[Path]:
         """获取输出目录"""
@@ -188,6 +195,48 @@ class TaskWidget(QWidget):
             new_index: 新的索引
         """
         self.task_index = new_index
-        # 更新标题
-        title_label = self.layout().itemAt(0).layout().itemAt(0).widget()
-        title_label.setText(f'任务 {self.task_index + 1}')
+        # 更新任务号标签
+        task_label = self.layout().itemAt(0).widget()
+        task_label.setText(f'#{self.task_index + 1}')
+
+    def set_output_enabled(self, enabled: bool) -> None:
+        """设置输出目录是否可编辑"""
+        self.output_path_edit.setEnabled(enabled)
+        self.browse_btn.setEnabled(enabled)
+
+    def set_password_enabled(self, enabled: bool) -> None:
+        """设置密码是否可编辑"""
+        self.password_combo.setEnabled(enabled)
+
+    def set_file_buttons_enabled(self, enabled: bool) -> None:
+        """设置文件按钮是否可点击"""
+        self.select_btn.setEnabled(enabled)
+        self.clear_btn.setEnabled(enabled)
+
+    def _apply_translation(self, i18n: 'I18N') -> None:
+        """应用翻译"""
+        if self.i18n == i18n:
+            return
+        self.i18n = i18n
+
+        # 获取布局中的标签和按钮
+        layout = self.layout()
+        task_label = layout.itemAt(0).widget()
+        output_label = layout.itemAt(1).widget()
+        password_label = layout.itemAt(3).widget()
+        file_info_label = layout.itemAt(5).widget()
+
+        task_label.setText(f'#{self.task_index + 1}')
+        output_label.setText(i18n.get('output'))
+        password_label.setText(i18n.get('password'))
+        self.output_path_edit.setPlaceholderText(i18n.get('select_output_dir'))
+        self.password_combo.setPlaceholderText(i18n.get('no_password'))
+        file_info_label.setText(i18n.get('file_count', len(self.task_config.files)))
+        self.select_btn.setText(i18n.get('select_files'))
+        self.clear_btn.setText(i18n.get('clear'))
+        self.delete_btn.setText(i18n.get('delete_task'))
+        self.delete_btn.setToolTip(i18n.get('delete_task_tooltip'))
+        self.browse_btn.setToolTip(i18n.get('browse'))
+
+        # 更新文件信息
+        self._update_file_info()

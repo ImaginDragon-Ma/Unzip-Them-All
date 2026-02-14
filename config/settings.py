@@ -21,6 +21,7 @@ class Config:
     saved_passwords: List[str] = field(default_factory=list)  # 保存的密码列表
     use_unified_password: bool = False  # 是否使用统一密码
     unified_password: str = ''  # 统一密码
+    language: str = 'zh_CN'  # 语言设置 ('zh_CN' 或 'en')
 
     def to_dict(self) -> dict:
         """转换为字典"""
