@@ -94,7 +94,8 @@ class PasswordManagerDialog(QDialog):
         """更新密码列表"""
         self.password_list.clear()
         for pwd in self.passwords:
-            self.password_list.addItem('***' if pwd else '(无密码)')
+            display = pwd if pwd else '(无密码)'
+            self.password_list.addItem(display)
 
     def add_password(self) -> None:
         """添加密码"""
@@ -138,8 +139,11 @@ class PasswordManagerDialog(QDialog):
 
     def accept(self) -> None:
         """接受对话框"""
-        # 更新密码管理器
-        self.password_manager.passwords = self.passwords
+        # 更新密码管理器 - 先清空再重新添加
+        self.password_manager.clear()
+        for pwd in self.passwords:
+            if pwd:  # 不添加空密码
+                self.password_manager.add_password(pwd)
         super().accept()
 
 
