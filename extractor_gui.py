@@ -205,26 +205,26 @@ class ExtractWorker(QThread):
             return False
 
         # 检查解压后的文件是否还有压缩文件
-        has_archive = False
         archive_files = []
         non_archive_files = []
 
         for extracted_file in extracted_files:
-            # 使用新的识别方法
+            # 先判断是否为压缩文件
             is_archive, format_name, reason = self.check_and_identify_archive(extracted_file)
 
-            # 先修正扩展名（如果需要）
-            fixed_file = self.fix_archive_extension(extracted_file)
-            file_basename = os.path.basename(fixed_file)
+            file_basename = os.path.basename(extracted_file)
 
             if is_archive:
-                has_archive = True
+                # 只有确认是压缩文件，才尝试修正扩展名
+                fixed_file = self.fix_archive_extension(extracted_file)
                 archive_files.append(fixed_file)
-                self.log_signal.emit(f"  ✓ 压缩文件: {file_basename}")
+                fixed_basename = os.path.basename(fixed_file)
+                self.log_signal.emit(f"  ✓ 压缩文件: {fixed_basename}")
                 self.log_signal.emit(f"    格式: {format_name}")
                 self.log_signal.emit(f"    理由: {reason}")
             else:
-                non_archive_files.append(fixed_file)
+                # 非压缩文件，保持原文件名，不修改扩展名
+                non_archive_files.append(extracted_file)
                 self.log_signal.emit(f"  ✗ 非压缩文件: {file_basename}")
                 self.log_signal.emit(f"    识别: {format_name}")
                 self.log_signal.emit(f"    理由: {reason}")
@@ -254,10 +254,9 @@ class ExtractWorker(QThread):
                     dest_path = f"{base}_{counter}{ext}"
                     self.log_signal.emit(f"    同名文件重命名: {os.path.basename(non_archive_file)} → {os.path.basename(dest_path)}")
 
-                # 移动文件（使用修正后的路径，如果修正成功的话）
-                src_file = non_archive_file if os.path.exists(non_archive_file) else extracted_file
-                if os.path.exists(src_file):
-                    shutil.move(src_file, dest_path)
+                # 移动文件（保持原文件名）
+                if os.path.exists(non_archive_file):
+                    shutil.move(non_archive_file, dest_path)
                     self.log_signal.emit(f"  → 已移动: {os.path.basename(dest_path)}")
 
         # 清理临时目录
@@ -463,51 +462,64 @@ class ExtractWorker(QThread):
         """
         根据文件信息修正压缩文件扩展名
 
-        检测文件头魔数（magic number）来确定实际压缩格式
+        只在确认文件是压缩格式时才修改扩展名，避免破坏非压缩文件
         """
-        # 常见压缩文件的魔数
-        magic_numbers = {
-            b'\x50\x4B\x03\x04': '.zip',  # ZIP
-            b'\x50\x4B\x05\x06': '.zip',  # ZIP (空)
-            b'\x50\x4B\x07\x08': '.zip',  # ZIP
-            b'\x52\x61\x72\x21': '.rar',  # RAR v1.5
-            b'\x52\x61\x72\x21\x1A\x07': '.rar',  # RAR v5.0
-            b'\x37\x7A\xBC\xAF\x27\x1C': '.7z',  # 7Z
-            b'\x1F\x8B': '.gz',  # GZIP
-        }
+        # 先判断是否为压缩文件
+        is_archive, format_name, reason = self.check_and_identify_archive(file_path)
 
-        # 检查当前扩展名是否正确
-        current_ext = os.path.splitext(file_path)[1].lower()
-        if current_ext in ['.zip', '.rar', '.7z', '.gz', '.tar']:
+        # 如果不是压缩文件，直接返回原路径，不修改扩展名
+        if not is_archive:
+            self.log_signal.emit(f"  [跳过扩展名修改] 不是压缩文件: {os.path.basename(file_path)}")
+            self.log_signal.emit(f"    原因: {reason}")
             return file_path
 
-        # 读取文件头
+        # 是压缩文件，检查是否需要修正扩展名
+        # 常见压缩文件的魔数
+        magic_numbers = {
+            b'\x50\x4B\x03\x04': ('ZIP', '.zip'),  # ZIP
+            b'\x50\x4B\x05\x06': ('ZIP', '.zip'),  # ZIP (空)
+            b'\x50\x4B\x07\x08': ('ZIP', '.zip'),  # ZIP
+            b'\x52\x61\x72\x21': ('RAR', '.rar'),  # RAR v1.5
+            b'\x52\x61\x72\x21\x1A\x07': ('RAR v5', '.rar'),  # RAR v5.0
+            b'\x37\x7A\xBC\xAF\x27\x1C': ('7Z', '.7z'),  # 7Z
+            b'\x1F\x8B': ('GZIP', '.gz'),  # GZIP
+            b'\x42\x5A\x68': ('BZIP2', '.bz2'),  # BZIP2
+            b'\xFD\x37\x7A\x58\x5A\x00': ('XZ', '.xz'),  # XZ
+        }
+
+        # 检查当前扩展名是否已经是正确的压缩格式
+        current_ext = os.path.splitext(file_path)[1].lower()
+        valid_extensions = {'.zip', '.rar', '.7z', '.gz', '.bz2', '.xz', '.tar'}
+        if current_ext in valid_extensions:
+            # 扩展名已经是压缩格式，不修改
+            return file_path
+
+        # 读取文件头，获取正确的扩展名
         try:
             with open(file_path, 'rb') as f:
-                header = f.read(8)
+                header = f.read(16)
 
-            for magic, ext in magic_numbers.items():
+            for magic, (format_name, ext) in magic_numbers.items():
                 if header.startswith(magic):
                     # 文件头匹配，修正扩展名
-                    new_path = os.path.splitext(file_path)[0] + ext
-                    try:
-                        os.rename(file_path, new_path)
-                        self.log_signal.emit(f"  修正扩展名: {os.path.basename(file_path)} → {ext}")
-                        return new_path
-                    except Exception as e:
-                        self.log_signal.emit(f"  [警告] 重命名失败: {str(e)}")
-                        return file_path
+                    if ext:  # 确保有有效的扩展名
+                        new_path = os.path.splitext(file_path)[0] + ext
+                        try:
+                            os.rename(file_path, new_path)
+                            self.log_signal.emit(f"  ✓ 修正扩展名: {os.path.basename(file_path)} → {ext}")
+                            self.log_signal.emit(f"    格式: {format_name}")
+                            return new_path
+                        except Exception as e:
+                            self.log_signal.emit(f"  [警告] 重命名失败: {str(e)}")
+                            return file_path
         except Exception as e:
             self.log_signal.emit(f"  [警告] 无法读取文件头: {str(e)}")
 
-        # 无法识别，默认为 .zip
-        new_path = os.path.splitext(file_path)[0] + '.zip'
-        try:
-            os.rename(file_path, new_path)
-            self.log_signal.emit(f"  默认扩展名: {os.path.basename(file_path)} → .zip")
-            return new_path
-        except Exception:
-            return file_path
+        # 无法识别文件头，但通过扩展名判断是压缩文件的情况
+        # 保持原扩展名不变，只记录日志
+        self.log_signal.emit(f"  [保持原扩展名] {os.path.basename(file_path)}")
+        self.log_signal.emit(f"    原因: 文件头无法识别，但扩展名表明是压缩文件")
+        return file_path
 
 
 class ExtractorGUI(QMainWindow):
