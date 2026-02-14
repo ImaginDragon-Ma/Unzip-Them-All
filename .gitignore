@@ -29,3 +29,6 @@ Thumbs.db
 *.log
 *.tmp
 temp_extract_*/
+
+# 配置文件（包含密码）
+extractor_config.json
