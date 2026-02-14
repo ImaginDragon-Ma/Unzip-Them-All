@@ -433,6 +433,14 @@ class ExtractorGUI(QMainWindow):
 
     def load_saved_settings(self) -> None:
         """加载保存的设置"""
+        # 设置统一密码
+        if self.config.unified_password:
+            # 确保统一密码在密码列表中
+            if self.config.unified_password not in self.password_manager.get_all():
+                # 如果不在列表中，添加到密码管理器
+                self.password_manager.add_password(self.config.unified_password)
+            self.unified_password_combo.setCurrentText(self.config.unified_password)
+
         # 更新密码下拉框
         self._update_password_combo(self.unified_password_combo)
 
@@ -458,6 +466,10 @@ class ExtractorGUI(QMainWindow):
             saved_passwords = self.password_manager.get_all()
             for task_widget in self.task_widgets:
                 task_widget.update_saved_passwords(saved_passwords)
+            # 更新统一密码下拉框
+            self._update_password_combo(self.unified_password_combo)
+            # 立即保存设置
+            self.save_settings()
 
     def save_settings(self) -> None:
         """保存设置"""
