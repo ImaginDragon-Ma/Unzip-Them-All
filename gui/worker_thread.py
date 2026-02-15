@@ -16,6 +16,7 @@ class ExtractWorker(QThread):
     progress_signal = pyqtSignal(str, int)  # (任务名, 进度百分比)
     log_signal = pyqtSignal(str)  # 日志信息
     finished_signal = pyqtSignal(int)  # (成功数量)
+    task_status_signal = pyqtSignal(int, str)  # (任务索引, 状态: pending/success/failed/processing)
 
     def __init__(
         self,
@@ -92,16 +93,23 @@ class ExtractWorker(QThread):
                         if self._extractor._extract_recursive(file_path, target_output_dir):
                             success_count += 1
                             self._log(f"✓ 成功: {file_path.name}")
+                            # 发送任务状态：成功
+                            self.task_status_signal.emit(task_idx, 'success')
                         else:
                             self._log(f"✗ 失败: {file_path.name}")
+                            # 发送任务状态：失败
+                            self.task_status_signal.emit(task_idx, 'failed')
+
                     except Exception as e:
                         self._log(f"✗ 错误: {file_path.name} - {str(e)}")
+                        # 发送任务状态：错误
+                        self.task_status_signal.emit(task_idx, 'error')
 
                     current_file += 1
             else:
                 # 如果有统一的输出目录，解压所有文件到该目录
                 if output_dir:
-                    # 使用 FileExtractor 的 extract 方法批量解压
+                    # 使用 FileExtractor 的 _extract_batch 方法批量解压
                     if password:
                         self._extractor.password = password
 
@@ -113,6 +121,14 @@ class ExtractWorker(QThread):
                         task_name
                     )
                     success_count += task_success
+
+                    # 更新任务状态
+                    if task_success == len(files):
+                        self.task_status_signal.emit(task_idx, 'success')
+                    elif task_success > 0:
+                        self.task_status_signal.emit(task_idx, 'partial')
+                    else:
+                        self.task_status_signal.emit(task_idx, 'failed')
 
                     current_file += len(files)
 

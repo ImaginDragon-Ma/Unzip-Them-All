@@ -10,6 +10,7 @@ import sys
 from PyQt5.QtWidgets import QApplication
 
 from gui import ExtractorGUI
+from gui.app_icon import create_app_icon
 
 
 def main() -> None:
@@ -17,7 +18,12 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setStyle('Fusion')  # 使用 Fusion 样式
 
+    # 设置应用程序图标
+    app_icon = create_app_icon()
+    app.setWindowIcon(app_icon)
+
     window = ExtractorGUI()
+    window.setWindowIcon(app_icon)
     window.show()
 
     sys.exit(app.exec_())

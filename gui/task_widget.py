@@ -36,77 +36,89 @@ class TaskWidget(QFrame):
         self.task_label = None
         self.output_label = None
         self.password_label = None
+        self.status_label = None  # 状态显示
 
         self.init_ui()
 
     def init_ui(self) -> None:
         """初始化界面"""
         layout = QHBoxLayout(self)
-        layout.setSpacing(6)
+        layout.setSpacing(5)
+        layout.setContentsMargins(3, 3, 3, 3)
 
         # 任务号
         self.task_label = QLabel(f'#{self.task_index + 1}')
         self.task_label.setFont(QFont('Arial', 10, QFont.Bold))
-        self.task_label.setMinimumWidth(35)
+        self.task_label.setMinimumWidth(30)
+        self.task_label.setMaximumWidth(30)
         layout.addWidget(self.task_label)
+
+        # 状态指示器
+        self.status_label = QLabel('○')
+        self.status_label.setFont(QFont('Segoe UI', 14))
+        self.status_label.setFixedWidth(25)
+        self.status_label.setStyleSheet('color: #FFA500; font-size: 14px; font-weight: bold;')
+        layout.addWidget(self.status_label)
 
         # 输出目录
         self.output_label = QLabel('输出:')
-        self.output_label.setMinimumWidth(40)
+        self.output_label.setMinimumWidth(35)
+        self.output_label.setMaximumWidth(35)
         layout.addWidget(self.output_label)
 
         self.output_path_edit = QLineEdit()
         self.output_path_edit.setFont(QFont('Arial', 9))
         self.output_path_edit.setPlaceholderText('选择输出目录...')
-        self.output_path_edit.setMinimumWidth(300)
-        self.output_path_edit.setMaximumWidth(400)
-        layout.addWidget(self.output_path_edit, 1)
+        self.output_path_edit.setMinimumWidth(250)
+        layout.addWidget(self.output_path_edit, 2)
 
         self.browse_btn = QPushButton('...')
-        self.browse_btn.setMaximumWidth(35)
+        self.browse_btn.setFixedWidth(30)
         self.browse_btn.setToolTip('浏览输出目录')
         self.browse_btn.clicked.connect(self.browse_output_dir)
         layout.addWidget(self.browse_btn)
 
         # 密码
         self.password_label = QLabel('密码:')
-        self.password_label.setMinimumWidth(40)
+        self.password_label.setMinimumWidth(35)
+        self.password_label.setMaximumWidth(35)
         layout.addWidget(self.password_label)
 
         self.password_combo = QComboBox()
         self.password_combo.setEditable(True)
         self.password_combo.setPlaceholderText('无密码')
-        self.password_combo.setMinimumWidth(150)
+        self.password_combo.setMinimumWidth(120)
         self._update_password_combo()
         layout.addWidget(self.password_combo, 1)
 
         # 文件信息
         self.file_info_label = QLabel('文件: 0')
-        self.file_info_label.setMinimumWidth(70)
+        self.file_info_label.setMinimumWidth(60)
+        self.file_info_label.setMaximumWidth(60)
         layout.addWidget(self.file_info_label)
 
         # 选择文件按钮
         self.select_btn = QPushButton('选择文件')
-        self.select_btn.setMinimumWidth(80)
+        self.select_btn.setMinimumWidth(75)
+        self.select_btn.setMaximumWidth(75)
         self.select_btn.clicked.connect(self.select_files)
         layout.addWidget(self.select_btn)
 
         # 清空按钮
         self.clear_btn = QPushButton('清空')
-        self.clear_btn.setMinimumWidth(55)
+        self.clear_btn.setMinimumWidth(50)
+        self.clear_btn.setMaximumWidth(50)
         self.clear_btn.clicked.connect(self.clear_files)
         layout.addWidget(self.clear_btn)
 
         # 删除任务按钮
         self.delete_btn = QPushButton('×')
-        self.delete_btn.setMaximumWidth(35)
+        self.delete_btn.setFixedWidth(30)
         self.delete_btn.setToolTip('删除此任务')
         self.delete_btn.setStyleSheet('QPushButton { color: red; font-weight: bold; }')
         if self.on_delete:
             self.delete_btn.clicked.connect(lambda: self.on_delete(self.task_index))
         layout.addWidget(self.delete_btn)
-
-        layout.addStretch()
 
     def _update_password_combo(self) -> None:
         """更新密码下拉框"""
@@ -251,3 +263,30 @@ class TaskWidget(QFrame):
 
         # 更新文件信息
         self._update_file_info()
+
+    def set_status(self, status: str) -> None:
+        """
+        设置任务状态
+
+        Args:
+            status: 状态 (pending/success/failed/processing)
+        """
+        status_map = {
+            'pending': '○',
+            'success': '●',
+            'failed': '✕',
+            'processing': '⟳'
+        }
+        style_map = {
+            'pending': 'color: #FFA500; font-size: 14px; font-weight: bold;',
+            'success': 'color: #00AA00; font-size: 14px; font-weight: bold;',
+            'failed': 'color: #FF0000; font-size: 14px; font-weight: bold;',
+            'processing': 'color: #0066FF; font-size: 14px; font-weight: bold;'
+        }
+        if status in status_map:
+            self.status_label.setText(status_map[status])
+            self.status_label.setStyleSheet(style_map[status])
+
+    def reset_status(self) -> None:
+        """重置任务状态"""
+        self.set_status('pending')

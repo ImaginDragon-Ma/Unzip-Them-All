@@ -158,6 +158,7 @@ class ExtractorGUI(QMainWindow):
         self.i18n = I18N(self.config.language)
         self.password_manager = PasswordManager(self.config.saved_passwords)
         self.task_widgets: List[TaskWidget] = []
+        self.task_status_map = {}  # 任务状态映射 {task_index: status}
 
         # 查找 WinRAR 路径
         self.winrar_path = self.config.winrar_path
@@ -545,6 +546,9 @@ class ExtractorGUI(QMainWindow):
         # 禁用按钮
         self._set_ui_enabled(False)
 
+        # 重置所有任务状态
+        self._reset_all_task_status()
+
         # 清空日志
         self.log_list.clear()
         self.status_label.setText(self.i18n.get('extracting'))
@@ -559,6 +563,7 @@ class ExtractorGUI(QMainWindow):
         self.worker.progress_signal.connect(self.update_progress)
         self.worker.log_signal.connect(self.add_log)
         self.worker.finished_signal.connect(self.extract_finished)
+        self.worker.task_status_signal.connect(self._on_task_status)
         self.worker.start()
 
     def _set_ui_enabled(self, enabled: bool) -> None:
@@ -584,6 +589,21 @@ class ExtractorGUI(QMainWindow):
             task_widget.output_path_edit.setEnabled(output_enabled)
             task_widget.password_combo.setEnabled(password_enabled)
 
+    def _on_task_status(self, task_idx: int, status: str) -> None:
+        """处理任务状态更新"""
+        # 更新状态映射
+        self.task_status_map[task_idx] = status
+        # 更新对应的任务组件
+        if task_idx < len(self.task_widgets):
+            task_widget = self.task_widgets[task_idx]
+            task_widget.set_status(status)
+
+    def _reset_all_task_status(self) -> None:
+        """重置所有任务状态为待处理"""
+        self.task_status_map.clear()
+        for task_widget in self.task_widgets:
+            task_widget.reset_status()
+
     def update_progress(self, task_name: str, progress: int) -> None:
         """更新进度"""
         self.progress_bar.setValue(progress)
@@ -597,6 +617,9 @@ class ExtractorGUI(QMainWindow):
     def extract_finished(self, success_count: int) -> None:
         """解压完成"""
         self._set_ui_enabled(True)
+
+        # 重置所有任务状态
+        self._reset_all_task_status()
 
         # 计算总文件数
         total_files = 0
